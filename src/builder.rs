@@ -1,5 +1,5 @@
 use crate::config::Config;
-use std::{path::{Path, PathBuf}, process::Stdio};
+use std::{path::{Path, PathBuf}, process::Stdio, fs::File, io::Write};
 use cargo_metadata::Metadata;
 use thiserror::Error;
 
@@ -82,13 +82,21 @@ impl Builder {
     }
 
     fn prepare_ovmf_file(&self, url: &str, path: &str) -> Result<(), BuildError> {
-        std::process::Command::new("curl")
-            .arg("-Lo")
-            .arg(path)
-            .arg(url)
-            .stdout(Stdio::piped())
-            .output()
-            .map_err(|_| BuildError::DownloadOvmfFirmwareFailed)?;
+        let response = reqwest::blocking::get(url)
+            .map_err(|err| BuildError::DownloadOvmfFirmwareFailed(err))?;
+        
+        let response = response.error_for_status()
+            .map_err(|err| BuildError::DownloadOvmfFirmwareFailed(err))?;
+
+        let bytes = response.bytes()
+            .map_err(|err| BuildError::DownloadOvmfFirmwareFailed(err))?;
+
+        let mut file = File::create(path)
+            .map_err(|err| BuildError::FileCreationFailed(err))?;
+        
+        file.write_all(&bytes)
+            .map_err(|err| BuildError::FileWriteFailed(err))?;
+
         Ok(())
     }
 
@@ -102,9 +110,14 @@ impl Builder {
     }
 
     fn clone_limine_binary(&self) -> Result<(), BuildError> {
-        if !std::path::Path::new("./target/limine").exists() {
-            std::fs::create_dir_all("./target/limine").unwrap();
-            
+        if !std::path::Path::new("./target/limine").exists() 
+            || !std::path::Path::new("./target/limine/limine-bios.sys").exists() 
+            || !std::path::Path::new("./target/limine/limine-bios-cd.bin").exists() 
+            || !std::path::Path::new("./target/limine/limine-uefi-cd.bin").exists() {
+            if !std::path::Path::new("./target/limine").exists() {
+                std::fs::create_dir_all("./target/limine").unwrap();
+            }
+
             std::process::Command::new("git")
                 .arg("clone")
                 .arg("https://github.com/limine-bootloader/limine.git")
@@ -115,6 +128,7 @@ impl Builder {
                 .output()
                 .map_err(|_| BuildError::CloneLimineBinaryFailed)?;
         }
+
         Ok(())
     }
 
@@ -129,11 +143,20 @@ impl Builder {
         std::fs::create_dir_all("./target/iso_root/EFI/BOOT").unwrap();
         
         std::fs::copy("target/limine/limine-bios.sys", "target/iso_root/boot/limine/limine-bios.sys")
-            .map_err(|_| BuildError::CopyLimineBinaryFailed)?;
+            .map_err(|e| {
+                println!("Failed to copy limine-bios.sys: {}", e);
+                BuildError::CopyLimineBinaryFailed
+            })?;
         std::fs::copy("target/limine/limine-bios-cd.bin", "target/iso_root/boot/limine/limine-bios-cd.bin")
-            .map_err(|_| BuildError::CopyLimineBinaryFailed)?;
+            .map_err(|e| {
+                println!("fila to copy limine-bios-cd.bin: {}", e);
+                BuildError::CopyLimineBinaryFailed
+            })?;
         std::fs::copy("target/limine/limine-uefi-cd.bin", "target/iso_root/boot/limine/limine-uefi-cd.bin")
-            .map_err(|_| BuildError::CopyLimineBinaryFailed)?;
+            .map_err(|e| {
+                println!("Failed to copy limine-uefi-cd.bin: {}", e);
+                BuildError::CopyLimineBinaryFailed
+            })?;
         
         std::fs::copy("target/limine/BOOTX64.EFI", "target/iso_root/EFI/BOOT/BOOTX64.EFI")
             .map_err(|_| BuildError::CopyLimineBinaryFailed)?;
@@ -200,8 +223,11 @@ impl Builder {
 
 #[derive(Debug, Error)]
 pub enum BuildError {
-    #[error("Failed to download OVMF firmware")]
-    DownloadOvmfFirmwareFailed,
+    #[error("Failed to download OVMF firmware: {0}")]
+    DownloadOvmfFirmwareFailed(#[from] reqwest::Error),
+
+    #[error("Failed to clone limine binary file(s)")]
+    CloneLimineBinaryFailed,
 
     #[error("Failed to copy limine.conf")]
     CopyLimineConfigFailed,
@@ -217,9 +243,6 @@ pub enum BuildError {
 
     #[error("Failed to create the Limine ISO")]
     CreateLimineIsoFailed,
-
-    #[error("Failed to clone Limine binary repository")]
-    CloneLimineBinaryFailed,
 
     #[error("Failed to copy kernel binary")]
     CopyKernelBinaryFailed,
@@ -244,4 +267,13 @@ pub enum BuildError {
 
     #[error("Failed to retrieve cargo metadata")]
     CargoMetadataFailed(#[from] cargo_metadata::Error),
+
+    #[error("Failed to create file: {0}")]
+    FileCreationFailed(#[from] std::io::Error),
+
+    #[error("Failed to write to file: {0}")]
+    FileWriteFailed(std::io::Error),
+
+    #[error("Limine binary file {0} is missing")]
+    LimineBinaryMissing(String),
 }
