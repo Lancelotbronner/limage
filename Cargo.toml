@@ -10,6 +10,7 @@ repository = "https://github.com/phillipg14/limage"
 [dependencies]
 anyhow = "1.0.28"
 cargo_metadata = "0.9.1"
+git2 = "0.20.2"
 locate-cargo-manifest = "0.2.0"
 reqwest = { version = "0.11", features = ["blocking"] }
 thiserror = "1.0.16"

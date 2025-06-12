@@ -118,15 +118,18 @@ impl Builder {
                 std::fs::create_dir_all("./target/limine").unwrap();
             }
 
-            std::process::Command::new("git")
-                .arg("clone")
-                .arg("https://github.com/limine-bootloader/limine.git")
-                .arg("--branch=v8.x-binary")
-                .arg("--depth=1")
-                .arg("target/limine")
-                .stdout(Stdio::piped())
-                .output()
-                .map_err(|_| BuildError::CloneLimineBinaryFailed)?;
+            let branch = "v8.x-binary";
+            let url = "https://github.com/limine-bootloader/limine.git";
+            let path = Path::new("target/limine");
+            let repo = match git2::build::RepoBuilder::new().branch(branch).clone(url, path) {
+                Ok(repo) => repo,
+                Err(e) => panic!("failed to clone: {}", e),
+            };
+
+            let head = repo.head().map_err(|_| BuildError::CloneLimineBinaryFailed)?;
+            let head_id = head.target().unwrap();
+            let head_commit = repo.find_commit(head_id).map_err(|_| BuildError::CloneLimineBinaryFailed)?;
+            println!("Clone limine repo with head_commit: {:?}", head_commit);
         }
 
         Ok(())
