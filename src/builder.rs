@@ -1,10 +1,11 @@
 use crate::config::LimageConfig;
 use git2::build::RepoBuilder;
 use git2::FetchOptions;
+use log::{debug, error, info, warn};
 use std::process::Command;
 use std::{fs::File, io::Write, path::Path, process::Stdio};
+use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
 use thiserror::Error;
-use tracing::{debug, error, info, instrument, warn};
 
 pub struct Builder {
     config: LimageConfig,
@@ -12,15 +13,14 @@ pub struct Builder {
 
 impl Builder {
     pub fn new(config: LimageConfig) -> Result<Self, BuildError> {
-        debug!("Creating new Builder with config: {:?}", config);
+        // debug!("Creating new Builder with config: {:?}", config);
         Ok(Self { config })
     }
 
-    #[instrument(skip(self), err)]
     pub fn build(&self, kernel_path: Option<&Path>) -> Result<(), BuildError> {
         info!("Starting build process");
         self.execute_prebuilder()?;
-        self.prepare_ovmf_files()?;
+        let prebuilt = self.prepare_ovmf_files()?;
         self.prepare_limine_files()?;
         self.copy_kernel(kernel_path)?;
         self.create_limine_iso()?;
@@ -28,7 +28,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn execute_prebuilder(&self) -> Result<(), BuildError> {
         if let Some(cmd) = &self.config.build.prebuilder {
             info!("Executing prebuilder command: {}", cmd);
@@ -51,44 +50,12 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
-    fn prepare_ovmf_files(&self) -> Result<(), BuildError> {
+    fn prepare_ovmf_files(&self) -> Result<Prebuilt, BuildError> {
         info!("Preparing OVMF files in: {:?}", self.config.build.ovmf_path);
         std::fs::create_dir_all(&self.config.build.ovmf_path)?;
-
-        for arch in &["x86_64"] {
-            for kind in &["code", "vars"] {
-                let url = format!(
-                    "https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-{}-{}.fd",
-                    kind, arch
-                );
-                let path = self
-                    .config
-                    .build
-                    .ovmf_path
-                    .join(format!("ovmf-{}-{}.fd", kind, arch));
-
-                debug!("Downloading OVMF file from {} to {:?}", url, path);
-                let response = reqwest::blocking::get(url)
-                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
-
-                let response = response
-                    .error_for_status()
-                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
-
-                let bytes = response
-                    .bytes()
-                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
-
-                File::create(path)?.write_all(&bytes)?;
-
-                info!("Downloaded OVMF {}-{}.fd successfully", kind, arch);
-            }
-        }
-        Ok(())
+		Ok(Prebuilt::fetch(Source::LATEST, &self.config.build.ovmf_path)?)
     }
 
-    #[instrument(skip(self), err)]
     fn prepare_limine_files(&self) -> Result<(), BuildError> {
         info!("Preparing Limine files");
         self.clone_limine_binary()?;
@@ -97,7 +64,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn clone_limine_binary(&self) -> Result<(), BuildError> {
         let required_files = [
             "limine-bios.sys",
@@ -177,7 +143,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn copy_limine_config(&self) -> Result<(), BuildError> {
         let config_dir = self.config.build.iso_root.join("boot").join("limine");
         debug!("Creating Limine config directory: {:?}", config_dir);
@@ -190,7 +155,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn copy_limine_binary(&self) -> Result<(), BuildError> {
         let limine_boot_dir = self.config.build.iso_root.join("boot").join("limine");
         let limine_efi_dir = self.config.build.iso_root.join("EFI").join("BOOT");
@@ -235,7 +199,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn copy_kernel(&self, kernel_path: Option<&Path>) -> Result<(), BuildError> {
         let kernel_dir = self.config.build.iso_root.join("boot").join("kernel");
         debug!("Creating kernel directory: {:?}", kernel_dir);
@@ -255,7 +218,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn create_limine_iso(&self) -> Result<(), BuildError> {
         // Create parent directory for the ISO if it doesn't exist
         if let Some(parent) = self.config.build.image_path.parent() {
@@ -269,7 +231,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn create_raw_iso(&self) -> Result<(), BuildError> {
         info!("Creating raw ISO at {:?}", self.config.build.image_path);
         let result = Command::new("xorriso")
@@ -303,7 +264,6 @@ impl Builder {
         Ok(())
     }
 
-    #[instrument(skip(self), err)]
     fn install_limine_to_iso(&self) -> Result<(), BuildError> {
         let limine_binary = self.config.build.limine_path.join("limine");
         info!("Installing Limine to ISO using binary: {:?}", limine_binary);
@@ -329,8 +289,8 @@ impl Builder {
 pub enum BuildError {
     #[error("Failed to execute prebuilder command: {source}")]
     PrebuilderFailed { source: std::io::Error },
-    #[error("Failed to download OVMF firmware: {source}")]
-    DownloadOvmfFirmwareFailed { source: reqwest::Error },
+	#[error("Failed to retrieve OVMF firmware: {source}")]
+	Ovmf { #[from] source: ovmf_prebuilt::Error },
     #[error("Failed to clone limine binary file(s)")]
     CloneLimineBinaryFailed,
     #[error("Failed to clone Limine repository: {source}")]

@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::{path::Path, process};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use limage::{
 	builder::Builder,
@@ -10,11 +9,6 @@ use limage::{
 };
 
 fn main() {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(EnvFilter::from_default_env())
-        .init();
-
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
         process::exit(1);

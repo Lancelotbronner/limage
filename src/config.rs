@@ -229,17 +229,14 @@ impl Default for LimageConfig {
 pub enum ConfigError {
     #[error("Failed to read config file")]
     ReadConfig { source: std::io::Error },
-
     #[error("Failed to parse config file")]
     ParseConfig { source: toml::de::Error },
-
     #[error("Failed to create {name} directory at {path:?}")]
     CreateDirectory {
         path: PathBuf,
         name: String,
         source: std::io::Error,
     },
-
     #[error("Mode '{mode}' not found in configuration file")]
     ModeNotFound { mode: String },
 }
