@@ -66,23 +66,13 @@ impl Runner {
 #[derive(Debug, Error)]
 pub enum RunError {
     #[error("Configuration error: {source}")]
-    Config { source: ConfigError },
-
+    Config { #[from] source: ConfigError },
     #[error("Failed to start QEMU: {source}\nMake sure QEMU is installed and available in PATH")]
     StartQemu { source: std::io::Error },
-
     #[error("Wait timeout error: {source}")]
     WaitTimeout { source: std::io::Error },
-
     #[error("Failed to kill QEMU process: {source}")]
     KillQemu { source: std::io::Error },
-
     #[error("Failed to wait for QEMU process: {source}")]
     WaitQemu { source: std::io::Error },
-}
-
-impl From<ConfigError> for RunError {
-    fn from(error: ConfigError) -> Self {
-        RunError::Config { source: error }
-    }
 }

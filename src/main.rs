@@ -3,10 +3,10 @@ use std::{path::Path, process};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use limage::{
-    builder::Builder,
-    cli::{Cli, Commands, RunMode},
-    config::LimageConfig,
-    runner::Runner,
+	builder::Builder,
+	cli::{Cli, Commands, RunMode},
+	config::LimageConfig,
+	runner::Runner,
 };
 
 fn main() {

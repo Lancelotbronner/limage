@@ -1,8 +1,8 @@
 use crate::config::LimageConfig;
-use std::{
-    path::Path,
-    process::{Command, Stdio},
-};
+use git2::build::RepoBuilder;
+use git2::FetchOptions;
+use std::process::Command;
+use std::{fs::File, io::Write, path::Path, process::Stdio};
 use thiserror::Error;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -69,18 +69,19 @@ impl Builder {
                     .join(format!("ovmf-{}-{}.fd", kind, arch));
 
                 debug!("Downloading OVMF file from {} to {:?}", url, path);
-                let result = Command::new("curl")
-                    .arg("-Lo")
-                    .arg(&path)
-                    .arg(&url)
-                    .stdout(Stdio::piped())
-                    .output()
-                    .map_err(|e| BuildError::DownloadOvmfFailed { source: e });
+                let response = reqwest::blocking::get(url)
+                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
 
-                if let Err(e) = &result {
-                    error!("Failed to download OVMF file: {}", e);
-                }
-                result?;
+                let response = response
+                    .error_for_status()
+                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
+
+                let bytes = response
+                    .bytes()
+                    .map_err(|err| BuildError::DownloadOvmfFirmwareFailed { source: err })?;
+
+                File::create(path)?.write_all(&bytes)?;
+
                 info!("Downloaded OVMF {}-{}.fd successfully", kind, arch);
             }
         }
@@ -134,22 +135,28 @@ impl Builder {
             }
 
             std::fs::create_dir_all(&self.config.build.limine_path)?; // Create first
-            let clone_result = Command::new("git")
-                .args(&[
-                    "clone",
-                    "https://github.com/limine-bootloader/limine.git",
-                    "--branch=v8.x-binary",
-                    "--depth=1",
-                ])
-                .arg(&self.config.build.limine_path)
-                .stdout(Stdio::piped())
-                .output()
-                .map_err(|e| BuildError::CloneLimineFailed { source: e });
+            let branch = "v8.x-binary";
+            let url = "https://github.com/limine-bootloader/limine.git";
+            let path = self.config.build.limine_path.as_path();
+            let mut fo = FetchOptions::new();
+            fo.depth(1);
+            let repo = match RepoBuilder::new()
+                .branch(branch)
+                .fetch_options(fo)
+                .clone(url, path)
+            {
+                Ok(repo) => repo,
+                Err(e) => panic!("failed to clone: {}", e),
+            };
 
-            if let Err(e) = &clone_result {
-                error!("Failed to clone Limine repository: {}", e);
-            }
-            clone_result?;
+            let head = repo
+                .head()
+                .map_err(|_| BuildError::CloneLimineBinaryFailed)?;
+            let head_id = head.target().unwrap();
+            let head_commit = repo
+                .find_commit(head_id)
+                .map_err(|_| BuildError::CloneLimineBinaryFailed)?;
+            println!("Clone limine repo with head_commit: {:?}", head_commit);
 
             info!("Building Limine");
             let build_result = Command::new("make")
@@ -320,36 +327,27 @@ impl Builder {
 
 #[derive(Debug, Error)]
 pub enum BuildError {
-    #[error("Failed to locate Cargo.toml")]
-    LocateManifest(#[from] locate_cargo_manifest::LocateManifestError),
-
     #[error("Failed to execute prebuilder command: {source}")]
     PrebuilderFailed { source: std::io::Error },
-
     #[error("Failed to download OVMF firmware: {source}")]
-    DownloadOvmfFailed { source: std::io::Error },
-
+    DownloadOvmfFirmwareFailed { source: reqwest::Error },
+    #[error("Failed to clone limine binary file(s)")]
+    CloneLimineBinaryFailed,
     #[error("Failed to clone Limine repository: {source}")]
     CloneLimineFailed { source: std::io::Error },
-
     #[error("Failed to copy Limine config: {source}")]
     CopyLimineConfig { source: std::io::Error },
-
     #[error("Failed to copy Limine binary {file}: {source}")]
     CopyLimineBinary {
         file: String,
         source: std::io::Error,
     },
-
     #[error("Failed to copy kernel binary: {source}")]
     CopyKernel { source: std::io::Error },
-
     #[error("Failed to create ISO: {source}")]
     CreateIso { source: std::io::Error },
-
     #[error("Failed to install Limine to ISO: {source}")]
     InstallLimine { source: std::io::Error },
-
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }

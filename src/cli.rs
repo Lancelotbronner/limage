@@ -13,15 +13,12 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Build,
-
     Run {
         #[arg(value_name = "KERNEL")]
         kernel: Option<PathBuf>,
-
         #[command(subcommand)]
         mode: Option<RunMode>,
     },
-
     Clean,
 }
 
