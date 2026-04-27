@@ -1,7 +1,9 @@
+use ovmf_prebuilt::{Arch, FileType, Prebuilt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use crate::cli::TargetArch;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LimageConfig {
@@ -114,9 +116,9 @@ fn default_qemu_args() -> Vec<String> {
         "-cdrom".to_string(),
         "{image}".to_string(),
         "-drive".to_string(),
-        "if=pflash,unit=0,format=raw,file={ovmf}/ovmf-code-x86_64.fd,readonly=on".to_string(),
+        "if=pflash,unit=0,format=raw,file={ovmf-code},readonly=on".to_string(),
         "-drive".to_string(),
-        "if=pflash,unit=1,format=raw,file={ovmf}/ovmf-vars-x86_64.fd".to_string(),
+        "if=pflash,unit=1,format=raw,file={ovmf-vars}".to_string(),
     ]
 }
 
@@ -161,16 +163,29 @@ impl LimageConfig {
 
     pub fn get_qemu_command(
         &self,
+		arch: TargetArch,
+        prebuilt: &Prebuilt,
         image_path: &Path,
         is_test: bool,
         mode: Option<&str>,
     ) -> Result<Vec<String>, ConfigError> {
         let mut cmd = vec![self.qemu.binary.clone()];
 
+        let image_path = image_path.display().to_string();
+        let ovmf_code = prebuilt
+            .get_file(arch.ovmf(), FileType::Code)
+            .display()
+            .to_string();
+        let ovmf_vars = prebuilt
+            .get_file(arch.ovmf(), FileType::Vars)
+            .display()
+            .to_string();
+
         for arg in &self.qemu.base_args {
             cmd.push(
-                arg.replace("{image}", &image_path.display().to_string())
-                    .replace("{ovmf}", &self.build.ovmf_path.display().to_string()),
+                arg.replace("{image}", &image_path)
+                    .replace("{ovmf-code}", &ovmf_code)
+                    .replace("{ovmf-vars}", &ovmf_vars),
             );
         }
 

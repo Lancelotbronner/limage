@@ -1,10 +1,11 @@
 use crate::config::LimageConfig;
+use crate::Kernel;
 use git2::build::RepoBuilder;
 use git2::FetchOptions;
 use log::{debug, error, info, warn};
+use ovmf_prebuilt::{Prebuilt, Source};
 use std::process::Command;
-use std::{fs::File, io::Write, path::Path, process::Stdio};
-use ovmf_prebuilt::{Arch, FileType, Prebuilt, Source};
+use std::{path::Path, process::Stdio};
 use thiserror::Error;
 
 pub struct Builder {
@@ -17,7 +18,7 @@ impl Builder {
         Ok(Self { config })
     }
 
-    pub fn build(&self, kernel_path: Option<&Path>) -> Result<(), BuildError> {
+    pub fn build(self, kernel_path: Option<&Path>) -> Result<Kernel, BuildError> {
         info!("Starting build process");
         self.execute_prebuilder()?;
         let prebuilt = self.prepare_ovmf_files()?;
@@ -25,7 +26,10 @@ impl Builder {
         self.copy_kernel(kernel_path)?;
         self.create_limine_iso()?;
         info!("Build completed successfully");
-        Ok(())
+        Ok(Kernel {
+            config: self.config,
+            prebuilt,
+        })
     }
 
     fn execute_prebuilder(&self) -> Result<(), BuildError> {
@@ -53,7 +57,10 @@ impl Builder {
     fn prepare_ovmf_files(&self) -> Result<Prebuilt, BuildError> {
         info!("Preparing OVMF files in: {:?}", self.config.build.ovmf_path);
         std::fs::create_dir_all(&self.config.build.ovmf_path)?;
-		Ok(Prebuilt::fetch(Source::LATEST, &self.config.build.ovmf_path)?)
+        Ok(Prebuilt::fetch(
+            Source::LATEST,
+            &self.config.build.ovmf_path,
+        )?)
     }
 
     fn prepare_limine_files(&self) -> Result<(), BuildError> {
@@ -289,8 +296,11 @@ impl Builder {
 pub enum BuildError {
     #[error("Failed to execute prebuilder command: {source}")]
     PrebuilderFailed { source: std::io::Error },
-	#[error("Failed to retrieve OVMF firmware: {source}")]
-	Ovmf { #[from] source: ovmf_prebuilt::Error },
+    #[error("Failed to retrieve OVMF firmware: {source}")]
+    Ovmf {
+        #[from]
+        source: ovmf_prebuilt::Error,
+    },
     #[error("Failed to clone limine binary file(s)")]
     CloneLimineBinaryFailed,
     #[error("Failed to clone Limine repository: {source}")]

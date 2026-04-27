@@ -1,24 +1,31 @@
 use crate::config::{ConfigError, LimageConfig};
 use std::{process::Command, time::Duration};
+use log::debug;
+use ovmf_prebuilt::Prebuilt;
 use thiserror::Error;
 use wait_timeout::ChildExt;
+use crate::cli::TargetArch;
+use crate::Kernel;
 
 pub struct Runner {
     config: LimageConfig,
+	arch: TargetArch,
+	prebuilt: Prebuilt,
     is_test: bool,
 }
 
 impl Runner {
-    pub fn new(config: LimageConfig, is_test: bool) -> Self {
-        Self { config, is_test }
+    pub fn new(kernel: Kernel, arch: TargetArch, is_test: bool) -> Self {
+        Self { config: kernel.config, arch, prebuilt: kernel.prebuilt, is_test }
     }
 
     pub fn run(&self, mode: Option<&str>) -> Result<i32, RunError> {
         let cmd_args =
             self.config
-                .get_qemu_command(&self.config.build.image_path, self.is_test, mode)?;
+                .get_qemu_command(self.arch, &self.prebuilt, &self.config.build.image_path, self.is_test, mode)?;
         let mut command = Command::new(&cmd_args[0]);
         command.args(&cmd_args[1..]);
+		debug!("{}\n\t{}", cmd_args[0], cmd_args[1..].join(&"\n\t"));
 
         if self.is_test {
             self.handle_test_execution(&mut command)
